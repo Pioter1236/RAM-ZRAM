@@ -29,8 +29,10 @@ class OverlayService : Service() {
     private lateinit var ramTv: TextView
     private lateinit var swpTv: TextView
     private lateinit var opLabel: TextView
+    private lateinit var mergeBtn: TextView
     private val handler = Handler(Looper.getMainLooper())
     private var dp = 1f
+    private var merged = false
     private var downX = 0f; private var downY = 0f; private var startX = 0; private var startY = 0
     private var rDownX = 0f; private var rDownY = 0f; private var rW = 0; private var rH = 0
 
@@ -51,6 +53,7 @@ class OverlayService : Service() {
 
     private fun buildView() {
         val prefs = getSharedPreferences("overlay", MODE_PRIVATE)
+        merged = prefs.getBoolean("merged", false)
 
         params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -84,7 +87,17 @@ class OverlayService : Service() {
             override fun onStartTrackingTouch(s: SeekBar?) {}
             override fun onStopTrackingTouch(s: SeekBar?) {}
         })
-        val resize = TextView(this).apply { text = "⤢ rozmiar"; setTextColor(Color.CYAN) }
+
+        // rzad przyciskow: rozmiar | kolko scalania | X
+        val controlsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val resize = TextView(this).apply {
+            text = "⤢ rozmiar"
+            setTextColor(Color.CYAN)
+            setPadding(0, 0, (12 * dp).toInt(), 0)
+        }
         resize.setOnTouchListener { _, e ->
             when (e.action) {
                 MotionEvent.ACTION_DOWN -> { rDownX = e.rawX; rDownY = e.rawY; rW = root.width; rH = root.height; true }
@@ -96,14 +109,29 @@ class OverlayService : Service() {
                 else -> false
             }
         }
+        mergeBtn = TextView(this).apply {
+            text = if (merged) "◉" else "○"
+            setTextColor(Color.YELLOW)
+            textSize = 18f
+            setPadding((4 * dp).toInt(), 0, (12 * dp).toInt(), 0)
+        }
+        mergeBtn.setOnClickListener {
+            merged = !merged
+            mergeBtn.text = if (merged) "◉" else "○"
+            prefs.edit().putBoolean("merged", merged).apply()
+            updateTexts()
+        }
         val close = Button(this).apply { text = "X — wylacz" }
         close.setOnClickListener { stopSelf() }
 
+        controlsRow.addView(resize)
+        controlsRow.addView(mergeBtn)
+        controlsRow.addView(close)
+
         root.addView(ramTv); root.addView(swpTv)
         root.addView(opLabel); root.addView(seek)
-        root.addView(resize); root.addView(close)
+        root.addView(controlsRow)
 
-        // przesuwanie palcem za tlo panelu
         root.setOnTouchListener { _, e ->
             when (e.action) {
                 MotionEvent.ACTION_DOWN -> { downX = e.rawX; downY = e.rawY; startX = params.x; startY = params.y; true }
@@ -118,6 +146,7 @@ class OverlayService : Service() {
                 else -> false
             }
         }
+        updateTexts()
     }
 
     private fun updateTexts() {
@@ -131,8 +160,16 @@ class OverlayService : Service() {
         val mt = m["MemTotal"] ?: 0; val ma = m["MemAvailable"] ?: 0
         val st = m["SwapTotal"] ?: 0; val sf = m["SwapFree"] ?: 0
         val mu = mt - ma; val su = st - sf
-        ramTv.text = String.format("RAM  %.1f / %.1f GB  (%d%%)", mu / 1048576.0, mt / 1048576.0, if (mt > 0) mu * 100 / mt else 0)
-        swpTv.text = String.format("ZRAM %.1f / %.1f GB  (%d%%)", su / 1048576.0, st / 1048576.0, if (st > 0) su * 100 / st else 0)
+        if (merged) {
+            swpTv.visibility = android.view.View.GONE
+            val tot = mt + st; val used = mu + su
+            ramTv.text = String.format("RAM+ZRAM %.1f / %.1f GB  (%d%%)",
+                used / 1048576.0, tot / 1048576.0, if (tot > 0) used * 100 / tot else 0)
+        } else {
+            swpTv.visibility = android.view.View.VISIBLE
+            ramTv.text = String.format("RAM  %.1f / %.1f GB  (%d%%)", mu / 1048576.0, mt / 1048576.0, if (mt > 0) mu * 100 / mt else 0)
+            swpTv.text = String.format("ZRAM %.1f / %.1f GB  (%d%%)", su / 1048576.0, st / 1048576.0, if (st > 0) su * 100 / st else 0)
+        }
     }
 
     override fun onStartCommand(i: Intent?, f: Int, s: Int): Int {
@@ -141,7 +178,7 @@ class OverlayService : Service() {
             nm.createNotificationChannel(NotificationChannel("ov", "Nakladka", NotificationManager.IMPORTANCE_LOW))
         val n = (if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, "ov")
         else Notification.Builder(this))
-            .setContentTitle("MemOverlay aktywna")
+            .setContentTitle("RAM ZRAM v1.1 aktywna")
             .setSmallIcon(android.R.drawable.ic_menu_info_details)
             .build()
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
