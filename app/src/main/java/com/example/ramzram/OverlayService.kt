@@ -54,6 +54,7 @@ class OverlayService : Service() {
     private fun buildView() {
         val prefs = getSharedPreferences("overlay", MODE_PRIVATE)
         merged = prefs.getBoolean("merged", false)
+        val savedAlpha = prefs.getInt("alpha", 80).coerceIn(10, 100)
 
         params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -65,22 +66,26 @@ class OverlayService : Service() {
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             x = prefs.getInt("x", 0); y = prefs.getInt("y", 200)
-            alpha = prefs.getInt("alpha", 80) / 100f
+            // v1.2: celowo BEZ params.alpha - przezroczystosc robi widok, nie okno
         }
 
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding((12 * dp).toInt(), (8 * dp).toInt(), (12 * dp).toInt(), (8 * dp).toInt())
             setBackgroundColor(Color.argb(210, 0, 0, 0))
+            alpha = savedAlpha / 100f
         }
         ramTv = TextView(this).apply { setTextColor(Color.WHITE) }
         swpTv = TextView(this).apply { setTextColor(Color.WHITE) }
-        opLabel = TextView(this).apply { setTextColor(Color.WHITE); text = "Alfa: ${prefs.getInt("alpha", 80)}%" }
-        val seek = SeekBar(this).apply { max = 100; progress = prefs.getInt("alpha", 80) }
+        opLabel = TextView(this).apply { setTextColor(Color.WHITE); text = "Alfa: $savedAlpha%" }
+        val seek = SeekBar(this).apply {
+            min = 10
+            max = 100
+            progress = savedAlpha
+        }
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
-                params.alpha = p / 100f
-                wm.updateViewLayout(root, params)
+                root.alpha = p / 100f
                 opLabel.text = "Alfa: $p%"
                 prefs.edit().putInt("alpha", p).apply()
             }
@@ -178,7 +183,7 @@ class OverlayService : Service() {
             nm.createNotificationChannel(NotificationChannel("ov", "Nakladka", NotificationManager.IMPORTANCE_LOW))
         val n = (if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, "ov")
         else Notification.Builder(this))
-            .setContentTitle("RAM ZRAM v1.1 aktywna")
+            .setContentTitle("RAM ZRAM v1.2 aktywna")
             .setSmallIcon(android.R.drawable.ic_menu_info_details)
             .build()
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
